@@ -1,24 +1,7 @@
-# A helper to print messages in a consistent style
-def "print-info" [message: string] {
-    print $"✅ ($message)"
-}
-
-# A helper to print error messages
-def "print-error" [message: string] {
-    print -e $"❌ ERROR: ($message)"
-}
-
-# Clear the terminal and scrollback so watch output starts from a clean buffer.
-def "reset-terminal" [] {
-    print -n "\u{001b}c"
-    print -n "\u{001b}[3J\u{001b}[H\u{001b}[2J"
-    print -n "\u{001b}[0m"
-}
-
 # Kattis runner
-export def "kat" [name: string, --quiet (-q)] {
+export def "kat" [name: string, --quiet (-q), --relative-error (-r): number] {
     print $"🐱 Kattis ($name) 🐱"
-    
+
     let input_dir = ("inputs" | path join $name)
     
     if not ($input_dir | path exists) {
@@ -83,13 +66,35 @@ export def "kat" [name: string, --quiet (-q)] {
         let expected = (open --raw $ans_file | str trim)
         let actual = ($output.stdout | str trim)
         
-        if $expected == $actual {
-            print-info $"Test passed: ($test_name) (($duration))"
+        if $relative_error != null {
+            try {
+                let exp = ($expected | into float)
+                let act = ($actual | into float)
+                let abs_diff = (($act - $exp) | math abs)
+                let denom = ($exp | math abs)
+                let rel = if $denom != 0 { $abs_diff / $denom } else { $abs_diff }
+                if $rel <= $relative_error {
+                    print-info $"Test passed: ($test_name) (($duration)) ans=($act) exp=($exp) variance=($rel)"
+                } else {
+                    print-error $"Test failed: ($test_name) (($duration))"
+                    if not $quiet {
+                        print $"Expected:\n($expected)"
+                        print $"Got:\n($actual)"
+                        print $"Variance: ($rel)"
+                    }
+                }
+            } catch { |err|
+                print-error $"Failed to compare as floats: ($err.msg)"
+            }
         } else {
-            print-error $"Test failed: ($test_name) (($duration))"
-            if not $quiet {
-                print $"Expected:\n($expected)"
-                print $"Got:\n($actual)"
+            if $expected == $actual {
+                print-info $"Test passed: ($test_name) (($duration))"
+            } else {
+                print-error $"Test failed: ($test_name) (($duration))"
+                if not $quiet {
+                    print $"Expected:\n($expected)"
+                    print $"Got:\n($actual)"
+                }
             }
         }
     }
@@ -100,17 +105,17 @@ export def "kat" [name: string, --quiet (-q)] {
     }
 }
 
-export def "kat watch" [name: string] {
-    watch-helper $name
+export def "kat watch" [name: string, --relative-error (-r): number] {
+    watch-helper $name --relative-error=$relative_error
     watch --quiet . --glob=**/*.rs {||
-      watch-helper $name
+      watch-helper $name --relative-error=$relative_error
     }
 }
 
-def watch-helper [name: string] {
+def watch-helper [name: string, --relative-error (-r): number] {
     reset-terminal
     try { 
-        kat $name
+        kat $name --relative-error=$relative_error
     } catch { |err| 
         print-error $"Compilation failed: ($err.msg)"
         print "🔄 Watching for changes..."
@@ -158,7 +163,8 @@ export def "kat samples" [name: string] {
         # The response from AoC might end in a newline, which we usually want to keep.
         $response | save --force $zip_path
         print-info $"Successfully saved input to '($zip_path)'"
-        tar -C $input_dir -xf $zip_path
+        cd $input_dir
+        unzip samples.zip
     } catch { |error|
         print-error "Failed to download input."
         print -e $"Reason: ($error.msg)"
@@ -192,6 +198,32 @@ export def "kat gist" [name: string] {
         print-error "Failed to upload Gist."
         $result.stderr? | default $result
     }
+}
+
+export def "kat submit" [name: string] {
+  let config_path = ".kattis.ini"
+  if not ($config_path | path exists) {
+    print-error "no .kattis.ini found. Go to https://open.kattis.com/info/submit"
+    return
+  }
+
+  let config = (open $config_path | parse ini)
+  let language = 'Rust'
+  let file_path = ("src" | path join "bin" $"($name).rs")
+  
+  # login
+  let cookies = (http post -f --content-type application/json --headers ['User-Agent', 'kattis-cli-submit'] $config.kattis.loginurl {'username': $config.user.username, 'token': $config.user.token} | get headers | get response)
+
+  let data = {
+    'submit': 'true',
+    'submit_ctr': 2,
+    'language': $language,
+    'problem': $name,
+    'script': 'true',
+    'mainclass': 'main.rs',
+    'subfile': []
+  }
+
 }
 
 # Generate a YouTube description with timestamps from a stage progress JSON file.
