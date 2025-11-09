@@ -105,6 +105,22 @@ export def "kat" [name: string, --quiet (-q), --relative-error (-r): number] {
     }
 }
 
+export def "kat show" [name: string] {
+  let url = $"https://open.kattis.com/problems/($name)"
+  http get $url | 
+    pup .problembody --charset UTF-8 | 
+    w3m -T text/html -dump |
+    lines |
+    str replace -m -r '^\s+' '' |
+    each {|l| 
+      if ($l | str starts-with '/') { 
+        print (img $"https://open.kattis.com($l)") 
+      } else { 
+        print $l 
+      } 
+    } | ignore
+}
+
 export def "kat watch" [name: string, --relative-error (-r): number] {
     watch-helper $name --relative-error=$relative_error
     watch --quiet . --glob=**/*.rs {||
