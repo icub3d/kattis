@@ -1,24 +1,28 @@
+export def "kat open" [name: string] {
+  ^firefox-developer-edition --new-window $"https://open.kattis.com/problems/($name)"
+}
+
+
 # Kattis runner
 export def "kat" [name: string, --quiet (-q), --relative-error (-r): number] {
     print $"🐱 Kattis ($name) 🐱"
 
     let input_dir = ("inputs" | path join $name)
-    
+
     if not ($input_dir | path exists) {
         print-error $"Input directory not found: ($input_dir)"
         return
     }
-    
+
     let input_files = (ls $input_dir | where name =~ '\.in$' | get name)
-    
+
     if ($input_files | is-empty) {
         print-error $"No .in files found in ($input_dir)"
         return
     }
-    
-    print "🔨 Building..."
+
     let build_result = (cargo build --release -q --bin $name | complete)
-    
+
     if $build_result.exit_code != 0 {
         print-error "Build failed"
         if not ($build_result.stderr | is-empty) {
@@ -26,35 +30,29 @@ export def "kat" [name: string, --quiet (-q), --relative-error (-r): number] {
         }
         return
     }
-    
+
     let binary_name = if $nu.os-info.name == "windows" { $"($name).exe" } else { $name }
     let binary_path = ("target" | path join "release" $binary_name)
-    
+
     if not ($binary_path | path exists) {
         print-error $"Binary not found at ($binary_path)"
         return
     }
-    
-    mut times = []
-    
+
     for $input_file in $input_files {
         let ans_file = ($input_file | str replace '.in' '.ans')
         let test_name = ($input_file | path basename)
-        
+
         if not ($ans_file | path exists) {
             print-error $"Answer file not found: ($ans_file)"
             continue
         }
-        
-        print $"\n📝 Testing ($test_name)..."
-        
+
         let timing = (timeit { cat $input_file | ^$binary_path | complete })
         let duration = $timing
-        
+
         let output = (cat $input_file | ^$binary_path | complete)
-        
-        $times = ($times | append $duration)
-        
+
         if $output.exit_code != 0 {
             print-error $"Program failed with exit code ($output.exit_code)"
             if not ($output.stderr | is-empty) {
@@ -62,10 +60,10 @@ export def "kat" [name: string, --quiet (-q), --relative-error (-r): number] {
             }
             continue
         }
-        
+
         let expected = (open --raw $ans_file | str trim)
         let actual = ($output.stdout | str trim)
-        
+
         if $relative_error != null {
             try {
                 let exp = ($expected | into float)
@@ -74,9 +72,9 @@ export def "kat" [name: string, --quiet (-q), --relative-error (-r): number] {
                 let denom = ($exp | math abs)
                 let rel = if $denom != 0 { $abs_diff / $denom } else { $abs_diff }
                 if $rel <= $relative_error {
-                    print-info $"Test passed: ($test_name) (($duration)) ans=($act) exp=($exp) variance=($rel)"
+print $"📝 ($test_name) ✅ \(($duration))"
                 } else {
-                    print-error $"Test failed: ($test_name) (($duration))"
+print $"📝 ($test_name) ❌ \(($duration))"
                     if not $quiet {
                         print $"Expected:\n($expected)"
                         print $"Got:\n($actual)"
@@ -88,20 +86,15 @@ export def "kat" [name: string, --quiet (-q), --relative-error (-r): number] {
             }
         } else {
             if $expected == $actual {
-                print-info $"Test passed: ($test_name) (($duration))"
+    print $"📝 ($test_name) ✅ \(($duration))"
             } else {
-                print-error $"Test failed: ($test_name) (($duration))"
+    print $"📝 ($test_name) ❌ \(($duration))"
                 if not $quiet {
                     print $"Expected:\n($expected)"
                     print $"Got:\n($actual)"
                 }
             }
         }
-    }
-    
-    if not ($times | is-empty) {
-        let avg = ($times | math avg)
-        print $"\n⏱️ Average time: ($avg)"
     }
 }
 
@@ -226,20 +219,134 @@ export def "kat submit" [name: string] {
   let config = (open $config_path | parse ini)
   let language = 'Rust'
   let file_path = ("src" | path join "bin" $"($name).rs")
-  
-  # login
-  let cookies = (http post -f --content-type application/json --headers ['User-Agent', 'kattis-cli-submit'] $config.kattis.loginurl {'username': $config.user.username, 'token': $config.user.token} | get headers | get response)
 
-  let data = {
-    'submit': 'true',
-    'submit_ctr': 2,
-    'language': $language,
-    'problem': $name,
-    'script': 'true',
-    'mainclass': 'main.rs',
-    'subfile': []
+  if not ($file_path | path exists) {
+      print-error $"Solution file not found: ($file_path)"
+      return
   }
 
+  # 1. Login and get cookies
+  print -n "Status: Logging in..."
+  let login_response = http post -f --content-type "application/x-www-form-urlencoded" --headers ['User-Agent', 'kattis-cli-submit'] ($config | get kattis.loginurl) {
+    user: ($config | get user.username),
+    token: ($config | get user.token),
+    script: "true"
+  }
+
+  if $login_response.status != 200 {
+      print-error "Login failed."
+      return
+  }
+
+  let cookies = ($login_response.headers.response
+    | where name == "set-cookie"
+    | get value
+    | each { |s| $s | split row ";" | first }
+    | str join "; ")
+
+  # 2. Prepare submission data and submit
+  # Note: Nushell's http post doesn't handle complex multipart forms well, so we use curl
+  print -n $"\r(ansi erase_line)Status: Submitting..."
+  
+  let submit_url = ($config | get kattis.submissionurl)
+  let file_basename = ($file_path | path basename)
+  
+  let submit_output = (do -i {
+    ^curl -sS -H "User-Agent: kattis-cli-submit" -H $"Cookie: ($cookies)" -F "submit=true" -F "submit_ctr=2" -F $"language=($language)" -F $"problem=($name)" -F "script=true" -F $"mainclass=($file_basename)" -F $"sub_file[]=@($file_path)" $submit_url
+  } | complete)
+
+  if $submit_output.exit_code != 0 {
+      print-error "Submission failed."
+      print $submit_output.stderr
+      return
+  }
+
+  let response_text = $submit_output.stdout
+    # Parse the submission id robustly (HTML or plain text)
+  let submission_id = do {
+    let found_lines = ($response_text | lines | find -r '^\s*Submission ID:\s*')
+    let by_line = if ($found_lines | is-empty) { "" } else { 
+      $found_lines | first | str replace -r '^\s*Submission ID:\s*' "" | str trim 
+    }
+    if not ($by_line | is-empty) { $by_line } else {
+      let parsed = ($response_text | parse -r 'Submission ID:\s*(?<id>\d+)')
+      if ($parsed | is-empty) { "" } else { $parsed | get id | first }
+    }
+  }
+
+  if ($submission_id | is-empty) {
+      print "" # newline
+      print-error "Could not get submission ID from response:"
+      print $response_text
+      return
+  }
+
+  let submission_url = $"(($config | get kattis.submissionsurl))/($submission_id)"
+
+  # 4. Check status
+  let get_status_text = {|id|
+    match $id {
+      0 | 1 => 'New',
+      2 => 'Waiting for compile',
+      3 => 'Compiling',
+      4 => 'Waiting for run',
+      5 => 'Running',
+      6 => 'Judge Error',
+      8 => 'Compile Error',
+      9 => 'Run Time Error',
+      10 => 'Memory Limit Exceeded',
+      11 => 'Output Limit Exceeded',
+      12 => 'Time Limit Exceeded',
+      13 => 'Illegal Function',
+      14 => 'Wrong Answer',
+      16 => 'Accepted',
+      _ => $"Unknown status ($id)"
+    }
+  }
+
+  while true {
+    sleep 1sec
+    let status_url = $"($submission_url)?json"
+    let status_data = (http get --headers [
+        "User-Agent", "kattis-cli-submit",
+        "Cookie", $cookies
+      ] $status_url)
+
+    let status_id = ($status_data.status_id | into int)
+    let status_text = (do $get_status_text $status_id)
+
+    if $status_id < 5 { # Not running yet
+        print -n $"\r(ansi erase_line)Status: ($status_text)"
+    } else {
+        let testcases_done = $status_data.testcase_index
+        let row_html = ($status_data.row_html | default "")
+        # Try to count testcases; fall back gracefully if tools are unavailable
+        let testcases_total = (try { 
+          let count_str = ($row_html | ^pup 'i json{}' | from json | length)
+          $count_str - 1
+        } catch { 0 })
+        if $testcases_total > 0 {
+          print -n $"\r(ansi erase_line)Status: ($status_text) [($testcases_done)/($testcases_total)]"
+        } else {
+          print -n $"\r(ansi erase_line)Status: ($status_text) [($testcases_done)]"
+        }
+    }
+
+    if $status_id > 5 { # Finished
+        print "" # Newline after final status
+        if $status_id == 16 { # Accepted
+            print $"✅ ($status_text)"
+        } else {
+            print $"❌ ($status_text)"
+        }
+        let feedback_html = (try { $status_data.feedback_html } catch { "" })
+        if not ($feedback_html | is-empty) {
+            let feedback_text = (try { $feedback_html | ^pup 'pre' text{} | str trim } catch { $feedback_html })
+            print $feedback_text
+        }
+        break
+    }
+  }
 }
 
 # Generate a YouTube description with timestamps from a stage progress JSON file.
