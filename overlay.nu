@@ -79,7 +79,10 @@ print $"📝 ($test_name) ❌ \(($duration))"
                         print $"Expected:\n($expected)"
                         print $"Got:\n($actual)"
                         print $"Variance: ($rel)"
+                    } else {
+                        break
                     }
+                  return
                 }
             } catch { |err|
                 print-error $"Failed to compare as floats: ($err.msg)"
@@ -92,7 +95,10 @@ print $"📝 ($test_name) ❌ \(($duration))"
                 if not $quiet {
                     print $"Expected:\n($expected)"
                     print $"Got:\n($actual)"
+                } else {
+                    break
                 }
+                return
             }
         }
     }
@@ -102,7 +108,7 @@ export def "kat show" [name: string] {
   let url = $"https://open.kattis.com/problems/($name)"
   http get $url | 
     pup .problembody --charset UTF-8 | 
-    w3m -T text/html -dump |
+    w3m -T text/html -dump -cols 10000 |
     lines |
     str replace -m -r '^\s+' '' |
     each {|l| 
@@ -112,6 +118,43 @@ export def "kat show" [name: string] {
         print $l 
       } 
     } | ignore
+}
+
+export def gen-tex [formula: string] {
+    # Create temporary directory
+    let tmpdir = (mktemp -d)
+    
+    # Create LaTeX document with custom color and font size
+    let latex_content = $"\\documentclass[10pt]{standalone}
+\\usepackage{amsmath}
+\\usepackage{xcolor}
+\\definecolor{customcolor}{HTML}{cdd6f4}
+\\color{customcolor}
+\\begin{document}
+$($formula)$
+\\end{document}"
+    
+    # Write LaTeX file
+    $latex_content | save $"($tmpdir)/eq.tex"
+    
+    # Save current directory and change to temp dir
+    let original_dir = $env.PWD
+    cd $tmpdir
+    
+    # Compile LaTeX to PDF
+    ^pdflatex -interaction=batchmode eq.tex | ignore
+    
+    # Convert PDF to PNG with transparent background
+    ^convert -density 300 -transparent white eq.pdf output.png
+    
+    # Display with kitty's icat
+    ^kitten icat output.png
+    
+    # Return to original directory
+    cd $original_dir
+    
+    # Clean up
+    rm -rf $tmpdir
 }
 
 export def "kat watch" [name: string, --relative-error (-r): number] {
