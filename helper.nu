@@ -358,6 +358,73 @@ def watch-cmd [name: string, --relative-error (-r): number] {
   }
 }
 
+# Upload solution to GitHub Gist
+def gist [name: string] {
+  let file_path = ("src" | path join "bin" $"($name).rs")
+
+  if not ($file_path | path exists) {
+    print $"❌ Solution file not found: ($file_path)"
+    return
+  }
+
+  print $"🚀 Uploading ($file_path) to GitHub Gist..."
+  let result = (gh gist create $file_path --desc $"Kattis ($name)" --public | complete)
+  
+  if $result.exit_code == 0 {
+    print $"✅ Gist uploaded successfully!"
+    print $result.stdout
+  } else {
+    print $"❌ Failed to upload Gist."
+    if not ($result.stderr | is-empty) {
+      print $result.stderr
+    }
+  }
+}
+
+# Generate YouTube title and description for a Kattis problem
+def yt [name: string] {
+  let file_path = ("src" | path join "bin" $"($name).rs")
+
+  if not ($file_path | path exists) {
+    print $"❌ Solution file not found: ($file_path)"
+    return
+  }
+
+  # Check if gist already exists
+  let filter_str = $"Kattis ($name)"
+  let existing_gist = (gh gist list --limit 1 $"--filter=($filter_str)" | complete)
+  
+  let gist_url = if $existing_gist.exit_code == 0 and not ($existing_gist.stdout | is-empty) {
+    let gist_id = ($existing_gist.stdout | split column "\t" | get column1.0)
+    $"https://gist.github.com/($gist_id)"
+  } else {
+    # Create new gist
+    print $"🚀 Creating GitHub Gist..."
+    let result = (gh gist create $file_path --desc $"Kattis ($name)" --public | complete)
+    
+    if $result.exit_code == 0 {
+      print $"✅ Gist created successfully!"
+      $result.stdout | str trim
+    } else {
+      print $"❌ Failed to create Gist."
+      if not ($result.stderr | is-empty) {
+        print $result.stderr
+      }
+      return
+    }
+  }
+
+  # Generate title and description
+  print "\n📺 YouTube Content:"
+  print "\nTitle:"
+  print $"($name) - Daily Kattis #coding #codeprep #programming #codingchallenge"
+  print "\nDescription:"
+  print $"🚀 Solving ($name) today! Solve one with me daily to stay sharp! 💪"
+  print ""
+  print $"Problem: https://open.kattis.com/problems/($name)"
+  print $"Solution: ($gist_url)"
+}
+
 # Get the expected output for a given problem and sample number
 def get-target [name: string, part="1": string] {
   let input_dir = ("inputs" | path join $name)
@@ -393,6 +460,8 @@ def main [command?: string, ...args] {
     print "  open <name>"
     print "  show <name>"
     print "  submit <name>"
+    print "  gist <name>"
+    print "  yt <name>"
     print "  watch <name> [--relative-error <number>]"
     return
   }
@@ -442,6 +511,22 @@ def main [command?: string, ...args] {
       let name = ($args | get 0)
       submit $name
     }
+    "yt" => {
+      if ($args | length) < 1 {
+        print "Usage: yt <name>"
+        return
+      }
+      let name = ($args | get 0)
+      yt $name
+    }
+    "gist" => {
+      if ($args | length) < 1 {
+        print "Usage: gist <name>"
+        return
+      }
+      let name = ($args | get 0)
+      gist $name
+    }
     "watch" => {
       if ($args | length) < 1 {
         print "Usage: watch <name> [--relative-error <number>]"
@@ -466,6 +551,8 @@ def main [command?: string, ...args] {
       print "  open <name>"
       print "  show <name>"
       print "  submit <name>"
+      print "  gist <name>"
+      print "  yt <name>"
       print "  watch <name> [--relative-error <number>]"
     }
   }
