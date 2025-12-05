@@ -1,40 +1,6 @@
 #!/usr/bin/env nu
 
-# Parse INI configuration files
-def "parse ini" [ path?: path ] {
-  let content = if ($path | is-empty) {
-    let data = $in
-    if ($data | describe | str contains "list<string>") {
-      $data
-    } else if ($data | describe | str contains "string") {
-      $data | lines
-    } else {
-      $data | into string | lines
-    }
-  } else {
-    cat $path | lines
-  }
-
-  $content
-  | where $it != "" and not ($it | str starts-with "#")  # ignore blanks and comments
-  | reduce -f {} {|line, acc|
-      if $line =~ '^\[.*\]$' {
-          let section = ($line | str replace -a -r '\[|\]' '')
-          $acc | upsert $section {} | upsert current_section $section
-      } else if $line =~ ':' {
-          let parts = ($line | split column -n 2 -r '[:=]' | each {|x| $x | str trim})
-          let key = ($parts | get 0.column1)
-          let val = ($parts | get 0.column2)
-          let section = ($acc.current_section | into string)
-          mut out = ($acc | reject current_section)
-          let current = (if ($out | get $section | is-empty) { {} } else { $out | get $section })
-          $out | upsert $section ($current | upsert $key $val) | upsert current_section $section
-      } else {
-          $acc
-      }
-  }
-  | reject -o current_section
-}
+source $nu.config-path
 
 # Download the sample inputs from Kattis for a given problem
 def get-input [name: string, part="1": string] {
@@ -62,26 +28,27 @@ def get-input [name: string, part="1": string] {
   }
 }
 
-# Open a Kattis problem in the browser
-def open [name: string] {
-  ^firefox-developer-edition --new-window $"https://open.kattis.com/problems/($name)"
-}
-
 # Show the problem description in the terminal
 def show [name: string] {
   let url = $"https://open.kattis.com/problems/($name)"
-  http get $url | 
+  let lines_list = (http get $url | 
     pup .problembody --charset UTF-8 | 
+    sd '^\s+' '' |
     w3m -T text/html -dump -cols 10000 |
-    lines |
-    str replace -m -r '^\s+' '' |
-    each {|l| 
-      if ($l | str starts-with '/') { 
-        print (img $"https://open.kattis.com($l)") 
-      } else { 
-        print $l 
-      } 
-    } | ignore
+    lines)
+  
+  mut img_counter = 1
+  for $l in $lines_list {
+    if ($l | str starts-with '/') { 
+      print (img $"https://open.kattis.com($l)") 
+    } else if ($l | str contains '\includegraphics') {
+      let img_num = ($img_counter | fill -a right -c '0' -w 4)
+      print (img $"https://open.kattis.com/problems/($name)/file/statement/en/img-($img_num).png")
+      $img_counter = $img_counter + 1
+    } else { 
+      print $l 
+    }
+  }
 }
 
 # Submit a solution to Kattis
@@ -390,19 +357,11 @@ def yt [name: string] {
     return
   }
 
-  # Check if gist already exists
-  let filter_str = $"Kattis ($name)"
-  let existing_gist = (gh gist list --limit 1 $"--filter=($filter_str)" | complete)
-  
-  let gist_url = if $existing_gist.exit_code == 0 and not ($existing_gist.stdout | is-empty) {
-    let gist_id = ($existing_gist.stdout | split column "\t" | get column1.0)
-    $"https://gist.github.com/($gist_id)"
-  } else {
     # Create new gist
     print $"🚀 Creating GitHub Gist..."
     let result = (gh gist create $file_path --desc $"Kattis ($name)" --public | complete)
     
-    if $result.exit_code == 0 {
+  let gist_url = if $result.exit_code == 0 {
       print $"✅ Gist created successfully!"
       $result.stdout | str trim
     } else {
@@ -411,14 +370,11 @@ def yt [name: string] {
         print $result.stderr
       }
       return
-    }
   }
 
   # Generate title and description
-  print "\n📺 YouTube Content:"
-  print "\nTitle:"
   print $"($name) - Daily Kattis #coding #codeprep #programming #codingchallenge"
-  print "\nDescription:"
+  print ""
   print $"🚀 Solving ($name) today! Solve one with me daily to stay sharp! 💪"
   print ""
   print $"Problem: https://open.kattis.com/problems/($name)"

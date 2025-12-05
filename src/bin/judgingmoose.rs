@@ -4,14 +4,15 @@ fn main() {
     let mut s = String::new();
     stdin().read_to_string(&mut s).unwrap();
 
-    let (a, i) = s
+    let (l, r) = s
         .trim()
         .split_once(' ')
         .map(|(l, r)| (l.parse::<usize>().unwrap(), r.parse::<usize>().unwrap()))
         .unwrap();
 
-    // i = c / a
-    // c = i * a
-
-    println!("{}", (i - 1) * a + 1);
+    if l == 0 && r == 0 {
+        println!("Not a moose");
+    } else {
+        println!("{} {}", if l == r { "Even" } else { "Odd" }, l.max(r) * 2);
+    }
 }

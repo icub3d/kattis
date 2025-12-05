@@ -6,7 +6,5 @@ fn main() {
 
     let n = s.trim().parse::<usize>().unwrap();
 
-    for m in 1..=n {
-        println!("{} Abracadabra", m);
-    }
+    (1..=n).for_each(|n| println!("{n} Abracadabra"));
 }

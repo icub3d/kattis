@@ -6,5 +6,5 @@ fn main() {
 
     let n = s.trim().parse::<f64>().unwrap();
 
-    println!("{}", (n * 1000. * 5280. / 4854.).round() as usize);
+    println!("{}", (n * (1000. * 5280. / 4854.)).round() as usize);
 }
