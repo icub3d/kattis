@@ -358,7 +358,7 @@ def yt [name: string] {
   }
 
     # Create new gist
-    print $"🚀 Creating GitHub Gist..."
+    print $"🚀 Creating GitHub Gist ($file_path) ..."
     let result = (gh gist create $file_path --desc $"Kattis ($name)" --public | complete)
     
   let gist_url = if $result.exit_code == 0 {
