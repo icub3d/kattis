@@ -40,10 +40,10 @@ def show [name: string] {
   mut img_counter = 1
   for $l in $lines_list {
     if ($l | str starts-with '/') { 
-      print (img $"https://open.kattis.com($l)") 
+      try { http get $"https://open.kattis.com($l)" | ^viu - } catch { }
     } else if ($l | str contains '\includegraphics') {
       let img_num = ($img_counter | fill -a right -c '0' -w 4)
-      print (img $"https://open.kattis.com/problems/($name)/file/statement/en/img-($img_num).png")
+      try { http get $"https://open.kattis.com/problems/($name)/file/statement/en/img-($img_num).png" | ^viu - } catch { }
       $img_counter = $img_counter + 1
     } else { 
       print $l 
